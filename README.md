@@ -1,7 +1,7 @@
 # BlackTelperion
 
 <p align="center">
-  <img src="/home/paola/Qgis/BlackTelperion/BlackTelperion/images/BlackTelperion_Logo.png" alt="BlackTelperion Logo" width="500"/>
+  <img src="./images/BlackTelperion_Logo.png" alt="BlackTelperion Logo" width="500"/>
 </p>
 
 ## Overview
