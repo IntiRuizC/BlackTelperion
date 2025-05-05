@@ -1,12 +1,12 @@
-# BlackTelperion
+
 
 <p align="center">
   <img src="./images/BlackTelperion_Logo.png" alt="BlackTelperion Logo" width="500"/>
 </p>
 
-## Overview
+# BlackTelperion
 
-BlackTelperion is Black Square's proprietary library for processing hyperspectral and multispectral imagery. Named after Telperion, one of the Two Trees of Valinor from Tolkien's legendarium, this library aims to gather scattered spectral information and transform it into meaningful insights.
+BlackTelperion is Black Square's specialized proprietary library for the processing and analysis of hyperspectral and multispectral imagery across multiple platforms. Named after Telperion, the silver tree that illuminated the world with its radiant light in Tolkien's legendarium, our library transforms spectral information into clear, meaningful data. Designed for remote sensing applications, BlackTelperion offers robust capabilities for capturing, processing, and interpreting spectral data from various platforms.
 
 ## Purpose
 
