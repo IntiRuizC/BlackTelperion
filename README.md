@@ -1,8 +1,6 @@
 # BlackTelperion
 
-<img src="https://i.pinimg.com/736x/42/1b/82/421b8275db29068088e67047c0e37564.jpg" alt="BlackTelperion Logo" width="200"/>
-
-> *"Like one of the Trees of Light, gathering the scattered rays into one beam."*
+<img src="https://i.pinimg.com/736x/42/1b/82/421b8275db29068088e67047c0e37564.jpg" alt="BlackTelperion Logo" width="100"/>
 
 ## Overview
 
@@ -14,7 +12,7 @@ BlackTelperion serves as a unified framework for processing spectral imagery fro
 - Sentinel-2 (ESA)
 - ASTER (NASA/METI)
 - ENMAP (DLR)
-- Hyspex (Our proprietary hyperspectral camera)
+- Hyspex (Our hyperspectral camera)
 - Additional platforms (planned for future integration)
 
 ## Repository Structure
@@ -66,22 +64,9 @@ Internal documentation and examples can be found in the project wiki.
 ## Basic Usage
 
 ```python
-from blacktelperion.io import load_image
-from blacktelperion.processing_boxes.sentinel import AtmosphericCorrection
-from blacktelperion.pipelines import VegetationIndexPipeline
 
-# Load a Sentinel-2 image
-img = load_image('path/to/sentinel_image.SAFE')
+#To be defined
 
-# Apply atmospheric correction
-corrected = AtmosphericCorrection().process(img)
-
-# Run a predefined pipeline
-pipeline = VegetationIndexPipeline()
-results = pipeline.run(corrected)
-
-# Access computed indices
-ndvi = results.get('ndvi')
 ```
 
 ## Development Guidelines
@@ -114,12 +99,10 @@ This repository and its contents are proprietary to Black Square and intended fo
 
 For questions or issues:
 - Create an issue in this repository
-- Contact the Spectral Processing Team via Slack (#spectral-processing)
+- Contact the Spectral Processing Team
 
 ## Future Development
 
 - Additional satellite platforms integration
-- Advanced atmospheric correction algorithms
 - Deep learning-based feature extraction
 - Cloud-optimized processing pipelines
-- Integration with our data warehouse
