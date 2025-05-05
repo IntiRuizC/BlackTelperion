@@ -1,6 +1,8 @@
 # BlackTelperion
 
-<img src="https://i.pinimg.com/736x/42/1b/82/421b8275db29068088e67047c0e37564.jpg" alt="BlackTelperion Logo" width="100"/>
+<p align="center">
+  <img src="/home/paola/Qgis/BlackTelperion/BlackTelperion/images/BlackTelperion_Logo.png" alt="BlackTelperion Logo" width="500"/>
+</p>
 
 ## Overview
 
