@@ -1,0 +1,243 @@
+import os
+import glob
+import numpy as np
+import rasterio
+from rasterio.transform import Affine
+import spectral.io.envi as envi
+import logging
+import shutil
+
+# Setup logger
+logger = logging.getLogger(__name__)
+
+def create_sentinel_spectral_cube(safe_directory, output_dir=None, bands_to_use=None, resolution=60):
+    """
+    Creates a spectral cube from Sentinel-2 L2A reflectance bands in ENVI format.
+    
+    Parameters:
+    -----------
+    safe_directory : str
+        Path to the Sentinel-2 SAFE directory
+        (e.g., "S2A_MSIL2A_20201210T185801_N0500_R113_T10TGK_20230302T053408.SAFE")
+    output_dir : str, optional
+        Directory where to save the output ENVI files
+        If None, uses the same directory as the input SAFE file
+    bands_to_use : list, optional
+        List of reflectance band names to include in the spectral cube (e.g., ['B02', 'B03', 'B04'])
+        If None or empty, all available reflectance bands for the specified resolution will be used
+    resolution : int, optional
+        Resolution in meters (10, 20, or 60), default is 60
+        
+    Returns:
+    --------
+    tuple
+        (spectral_cube, metadata) - The spectral cube as numpy array and the metadata dict
+        
+    Raises:
+    -------
+    ValueError
+        If bands are not available or resolution is invalid
+    FileNotFoundError
+        If required files or directories are not found
+    """
+    # Validate resolution
+    if resolution not in [10, 20, 60]:
+        logger.error(f"Invalid resolution: {resolution}. Must be 10, 20, or 60.")
+        raise ValueError(f"Invalid resolution: {resolution}. Must be 10, 20, or 60.")
+    
+    # Set default output directory if not provided
+    if output_dir is None:
+        # Use the same directory as the input SAFE file
+        output_dir = os.path.dirname(safe_directory)
+        logger.info(f"No output directory specified. Using: {output_dir}")
+    
+    # Make sure the output directory exists
+    if not os.path.exists(output_dir):
+        try:
+            os.makedirs(output_dir)
+            logger.info(f"Created output directory: {output_dir}")
+        except Exception as e:
+            logger.error(f"Failed to create output directory: {str(e)}")
+            raise
+    
+    # Get the base name from the SAFE directory path
+    # First, check if the path itself ends with .SAFE
+    if safe_directory.endswith('.SAFE'):
+        # Extract just the filename part without the .SAFE extension
+        base_name = os.path.basename(safe_directory[:-5])
+    else:
+        # The path might be to a subdirectory within the SAFE structure
+        # Find the .SAFE part in the path
+        safe_parts = safe_directory.split('.SAFE')
+        if len(safe_parts) > 1:  # If .SAFE exists in the path
+            # Get just the filename part of the path leading up to .SAFE
+            safe_dir_part = safe_parts[0]
+            base_name = os.path.basename(safe_dir_part)
+        else:
+            # Fallback: just use the basename of the provided path
+            base_name = os.path.basename(safe_directory)
+    
+    logger.info(f"Using base name: {base_name} for output files")
+    
+    # Create output filename with the specified format - note the "*" around "spectralcube"
+    output_filename = f"{base_name}_spectralcube_R{resolution}m"
+    full_output_path = os.path.join(output_dir, output_filename)
+    
+    logger.info(f"Output will be saved as: {full_output_path}.dat and {full_output_path}.hdr")
+    logger.info(f"Creating spectral cube with reflectance bands: {bands_to_use} at {resolution}m resolution")
+    
+    # Dictionary of available reflectance bands for each resolution
+    available_bands = {
+        10: ['B02', 'B03', 'B04', 'B08'],
+        
+        20: ['B01', 'B02', 'B03', 'B04', 'B05', 'B06', 'B07', 'B8A', 'B11', 'B12'],
+        
+        60: ['B01', 'B02', 'B03', 'B04', 'B05', 'B06', 'B07', 'B8A', 'B09', 'B11', 'B12']
+    }
+    
+    # If bands_to_use is None or empty, use all available bands for the resolution
+    if not bands_to_use:
+        bands_to_use = available_bands[resolution]
+        logger.info(f"No specific bands requested. Using all available bands at {resolution}m: {bands_to_use}")
+    
+    # Check if all requested bands are available in the specified resolution
+    invalid_bands = []
+    for band in bands_to_use:
+        if band not in available_bands[resolution]:
+            invalid_bands.append(f"{band} (not available at {resolution}m resolution)")
+    
+    if invalid_bands:
+        error_msg = f"The following bands are not available at {resolution}m resolution: {', '.join(invalid_bands)}. "
+        error_msg += f"Available bands for {resolution}m resolution are: {', '.join(available_bands[resolution])}"
+        logger.error(error_msg)
+        raise ValueError(error_msg)
+    
+    if invalid_bands:
+        error_msg = f"The following bands are not available at {resolution}m resolution: {', '.join(invalid_bands)}. "
+        logger.error(error_msg)
+        raise ValueError(error_msg)
+    
+    # Find the correct image data directory
+    granule_dir = glob.glob(os.path.join(safe_directory, 'GRANULE', 'L2A_*'))
+    if not granule_dir:
+        error_msg = f"Could not find GRANULE directory in {safe_directory}"
+        logger.error(error_msg)
+        raise FileNotFoundError(error_msg)
+    
+    # Construct the path to the resolution-specific image directory
+    img_data_dir = os.path.join(granule_dir[0], 'IMG_DATA', f'R{resolution}m')
+    if not os.path.exists(img_data_dir):
+        error_msg = f"Could not find R{resolution}m directory in {granule_dir[0]}/IMG_DATA"
+        logger.error(error_msg)
+        raise FileNotFoundError(error_msg)
+    
+    logger.info(f"Found image data directory: {img_data_dir}")
+    
+    # Dictionary to store paths for each band
+    band_paths = {}
+    
+    # Find band files in the directory
+    for band in bands_to_use:
+        # Search pattern for Sentinel-2 L2A band files
+        pattern = os.path.join(img_data_dir, f"*_{band}_{resolution}m.jp2")
+        matches = glob.glob(pattern)
+        
+        if matches:
+            band_paths[band] = matches[0]
+            logger.info(f"Found {band} at: {band_paths[band]}")
+        else:
+            error_msg = f"Could not find band {band} in {img_data_dir}"
+            logger.error(error_msg)
+            raise FileNotFoundError(error_msg)
+    
+    # Load the first band to get reference metadata
+    reference_band = bands_to_use[0]
+    with rasterio.open(band_paths[reference_band]) as src:
+        reference_profile = src.profile.copy()
+        reference_shape = (src.height, src.width)
+        
+        # Extract geospatial information
+        transform = src.transform
+        crs = src.crs
+    
+    logger.info(f"Reference band {reference_band} shape: {reference_shape}")
+    
+    # Create an empty array for our spectral cube
+    num_bands = len(bands_to_use)
+    spectral_cube = np.zeros((reference_shape[0], reference_shape[1], num_bands), dtype=np.float32)
+    
+    # Load each band and add to the spectral cube
+    for i, band in enumerate(bands_to_use):
+        with rasterio.open(band_paths[band]) as src:
+            band_data = src.read(1).astype(np.float32)
+            
+            # Replace nodata (0) with NaN
+            band_data[band_data == 0] = np.nan
+            
+            # Add to spectral cube - bands in the last dimension
+            spectral_cube[:, :, i] = band_data
+    
+    logger.info(f"Spectral cube created with shape: {spectral_cube.shape}")
+    
+    # Prepare ENVI header metadata
+    envi_metadata = {
+        'description': f'Sentinel-2 L2A spectral cube with bands: {", ".join(bands_to_use)}',
+        'bands': num_bands,
+        'lines': reference_shape[0],
+        'samples': reference_shape[1],
+        'interleave': 'bsq',  # Explicitly set BSQ interleave format
+        'data type': 4,       # 4 corresponds to float32
+        'byte order': 0,
+        'band names': bands_to_use,
+        'coordinate system string': str(crs),
+        'map info': [
+            str(crs.to_epsg()),
+            '1', '1',  # Pixel location (ENVI format is 1-based)
+            str(transform.c),  # Upper left x
+            str(transform.f),  # Upper left y
+            str(transform.a),  # Pixel width
+            str(abs(transform.e)),  # Pixel height
+            ' '
+        ],
+        'data ignore value': float('nan')  # Set NaN as the nodata value
+    }
+    
+    # Save as ENVI format
+    try:
+        # Create full file paths with correct extensions
+        base_output_path = full_output_path
+        header_path = f"{base_output_path}.hdr"
+        dat_path = f"{base_output_path}.dat"
+        
+        # Save the spectral cube using spectral.io.envi with explicit extension
+        envi.save_image(header_path, spectral_cube, metadata=envi_metadata, 
+                       force=True, ext='.dat')
+        
+        # Check if the file was saved properly
+        if os.path.exists(dat_path):
+            logger.info(f"Saved spectral cube to {dat_path} with header {header_path}")
+        else:
+            logger.warning(f"Could not find {dat_path}, checking for alternate extensions...")
+            # Find the created data file (which might have .img extension)
+            img_path = None
+            potential_extensions = ['.img', '.IMG', '.raw', '.RAW', '.bil', '.BIL', '.bsq', '.BSQ', '.bip', '.BIP']
+            for ext in potential_extensions:
+                temp_path = f"{base_output_path}{ext}"
+                if os.path.exists(temp_path):
+                    img_path = temp_path
+                    break
+            
+            # If found, rename to .dat
+            if img_path:
+                shutil.move(img_path, dat_path)
+                logger.info(f"Renamed data file from {img_path} to {dat_path}")
+            else:
+                logger.warning(f"Could not find data file with known extensions. Please check the output directory.")
+        
+    except Exception as e:
+        logger.error(f"Failed to save ENVI files: {str(e)}")
+        raise
+    
+    return spectral_cube, envi_metadata, full_output_path
+        
+
