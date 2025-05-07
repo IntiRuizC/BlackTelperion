@@ -12,33 +12,84 @@ logger = logging.getLogger(__name__)
 
 def create_sentinel_spectral_cube(safe_directory, output_dir=None, bands_to_use=None, resolution=60):
     """
-    Creates a spectral cube from Sentinel-2 L2A reflectance bands in ENVI format.
+    Creates a spectral cube from Sentinel-2 L2A imagery in ENVI format (.dat and .hdr).
     
-    Parameters:
-    -----------
+    This function processes Sentinel-2 L2A data to generate a spectral cube containing
+    selected reflectance bands. The function locates the appropriate bands within the 
+    SAFE directory structure, reads them, and combines them into a single multi-band image.
+    The output is saved in ENVI format with a .dat data file and .hdr header file. 
+    
+    The function replaces the original nodata values (0) with NaN and converts 
+    all data to float32 format for better processing compatibility.
+    
+    Parameters
+    ----------
     safe_directory : str
         Path to the Sentinel-2 SAFE directory
         (e.g., "S2A_MSIL2A_20201210T185801_N0500_R113_T10TGK_20230302T053408.SAFE")
+        Can be a full path to the .SAFE directory or to a subdirectory within it.
+    
     output_dir : str, optional
-        Directory where to save the output ENVI files
-        If None, uses the same directory as the input SAFE file
-    bands_to_use : list, optional
-        List of reflectance band names to include in the spectral cube (e.g., ['B02', 'B03', 'B04'])
-        If None or empty, all available reflectance bands for the specified resolution will be used
+        Directory where output ENVI files will be saved.
+        If None, uses the same directory as the input SAFE file.
+        The directory will be created if it doesn't exist.
+    
+    bands_to_use : list of str, optional
+        List of reflectance band names to include in the spectral cube (e.g., ['B02', 'B03', 'B04']).
+        If None or empty, all available reflectance bands for the specified resolution will be used.
+        The order of bands in this list determines the order in the output spectral cube.
+        
+        Available bands by resolution:
+        - 10m: B02, B03, B04, B08
+        - 20m: B01, B02, B03, B04, B05, B06, B07, B8A, B11, B12
+        - 60m: B01, B02, B03, B04, B05, B06, B07, B8A, B09, B11, B12
+    
     resolution : int, optional
-        Resolution in meters (10, 20, or 60), default is 60
+        Resolution in meters. Must be one of: 10, 20, or 60.
+        Default is 60m, which includes the most available bands.
         
-    Returns:
-    --------
-    tuple
-        (spectral_cube, metadata) - The spectral cube as numpy array and the metadata dict
-        
-    Raises:
+    Returns
     -------
+    tuple
+        (spectral_cube, metadata, output_path)
+        - spectral_cube: numpy.ndarray
+            3D array with dimensions (height, width, bands)
+        - metadata: dict
+            ENVI header metadata
+        - output_path: str
+            Path to the output files (without extension)
+        
+    Raises
+    ------
     ValueError
-        If bands are not available or resolution is invalid
+        If bands are not available at the specified resolution or if resolution is invalid.
+        The error message will list which bands are available at the given resolution.
+    
     FileNotFoundError
-        If required files or directories are not found
+        If required files or directories cannot be found within the SAFE structure.
+        
+    Examples
+    --------
+    >>> # Create RGB cube at 60m resolution
+    >>> cube, metadata, path = create_sentinel_spectral_cube(
+    ...     "S2A_MSIL2A_20201210T185801_N0500_R113_T10TGK_20230302T053408.SAFE",
+    ...     bands_to_use=['B04', 'B03', 'B02'],
+    ...     resolution=60
+    ... )
+    
+    >>> # Use all available bands at 10m resolution
+    >>> cube, metadata, path = create_sentinel_spectral_cube(
+    ...     "S2A_MSIL2A_20201210T185801_N0500_R113_T10TGK_20230302T053408.SAFE",
+    ...     resolution=10
+    ... )
+    
+    Notes
+    -----
+    - The output file naming follows the pattern: {base_name}_spectralcube_R{resolution}m.dat
+      where base_name is derived from the SAFE directory name.
+    - The spectral cube shape is (height, width, bands) with bands in the last dimension.
+    - All data is converted to float32 and 0 values are replaced with NaN.
+    - The ENVI file is saved in BSQ (Band Sequential) format.
     """
     # Validate resolution
     if resolution not in [10, 20, 60]:
