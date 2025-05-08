@@ -21,17 +21,26 @@ BlackTelperion serves as a unified framework for processing spectral imagery fro
 
 ```
 BS-Hyperion/
-├── io/                           # Input/output operations
-│   └── platform_specific/        # Platform-specific I/O handlers
-├── processing_boxes/             # Core processing modules
-│   ├── base_processing_box.py    # Abstract base class for all processors
-│   ├── enmap/                    # EnMAP-specific processing
-│   ├── aster/                    # ASTER-specific processing
-│   ├── sentinel/                 # Sentinel-2 specific processing
-│   └── Hyspex/                   # Hyspex (our camera) specific processing
-├── pipelines/                    # Ready-to-use processing pipelines
-│   ├── base_pipeline.py          # Pipeline infrastructure
-└── utils/                        # Utility functions and shared tools
+├── io/
+│   └── spectral_cubes.py         # Image readers for different platforms
+├── core/
+│   ├── image.py                  # Base image class for data representation
+│   └── factory.py                # ImageFactory for creating appropriate objects
+├── platforms/
+│   ├── base_platform.py          # Base class with common methods
+│   ├── enmap.py                  # EnMAP platform implementation
+│   ├── aster.py                  # ASTER platform implementation 
+│   ├── sentinel.py               # Sentinel-2 implementation
+│   └── hyspex.py                 # Hyspex implementation
+├── products/
+│   ├── base_product.py           # Base class for derived products
+│   ├── spectral_index.py         # Specialized class for indices
+│   ├── classification.py         # Classifications and thematic maps
+│   └── mask.py                   # Binary/categorical masks
+├── utils/
+│   ├── metadata.py               # Metadata handling utilities
+│   └── visualization.py          # Visualization helpers
+└── examples/                     # Example usage scripts
 ```
 
 ## Getting Started
