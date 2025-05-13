@@ -291,4 +291,163 @@ def create_sentinel_spectral_cube(safe_directory, output_dir=None, bands_to_use=
     
     return spectral_cube, envi_metadata, full_output_path
         
+        
+import rasterio
+from rasterio.enums import Resampling
+import re
+
+def create_hyspex_spectral_cube(hdr_path, output_dir):
+    """
+    Processes a HySpex hyperspectral cube (.hdr and .bsq files):
+    1. Reads the .hdr file and corresponding .bsq data
+    2. Converts all values <= 0 OR equal to 15000 to np.nan
+    3. Updates the header to set NaN as the data ignore value
+    4. Saves the result as .dat and .hdr files
+    
+    Parameters:
+    -----------
+    hdr_path : str
+        Path to the .hdr file
+    output_dir : str
+        Directory to save output files
+    
+    Returns:
+    --------
+    tuple
+        Paths to output .dat and .hdr files
+    """
+    # Create output directory if it doesn't exist
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Extract base name and directory
+    base_name = os.path.basename(hdr_path).replace('.hdr', '')
+    input_dir = os.path.dirname(hdr_path)
+    
+    # Find the corresponding .bsq file
+    bsq_path = os.path.join(input_dir, f"{base_name}.bsq")
+    if not os.path.exists(bsq_path):
+        # Try finding any .bsq file in the same directory with the same base name
+        for file in os.listdir(input_dir):
+            if file.startswith(base_name) and file.endswith('.bsq'):
+                bsq_path = os.path.join(input_dir, file)
+                break
+    
+    if not os.path.exists(bsq_path):
+        error_msg = f"Could not find .bsq file for {hdr_path}"
+        logger.error(error_msg)
+        raise FileNotFoundError(error_msg)
+    
+    logger.info(f"Found corresponding BSQ file: {bsq_path}")
+    
+    # Output paths
+    output_dat_path = os.path.join(output_dir, f"{base_name}.dat")
+    output_hdr_path = os.path.join(output_dir, f"{base_name}.hdr")
+    
+    # Read the original header file content
+    with open(hdr_path, 'r') as f:
+        orig_hdr_content = f.read()
+    
+    # Open dataset with rasterio
+    try:
+        with rasterio.open(bsq_path) as src:
+            # Get metadata
+            profile = src.profile
+            
+            # Update profile for output
+            profile.update(
+                driver='ENVI',
+                dtype=np.float32,
+                nodata=np.nan
+            )
+            
+            logger.info(f"Processing hyperspectral cube with dimensions: {src.width}x{src.height}x{src.count}")
+            
+            # Create output dataset
+            with rasterio.open(output_dat_path, 'w', **profile) as dst:
+                # Process each band
+                for band_idx in range(1, src.count + 1):
+                    # Read band data
+                    data = src.read(band_idx)
+                    
+                    # Convert to float32
+                    data = data.astype(np.float32)
+                    
+                    # Set values <= 0 OR equal to 15000 to NaN
+                    data[(data <= 0) | (data == 15000)] = np.nan
+                    
+                    # Write to output
+                    dst.write(data, band_idx)
+    except Exception as e:
+        error_msg = f"Error processing BSQ file: {str(e)}"
+        logger.error(error_msg)
+        raise
+    
+    logger.info(f"Data processing complete. Now updating header file...")
+    
+    # Check if header file exists
+    if os.path.exists(output_hdr_path):
+        # Read the current header
+        with open(output_hdr_path, 'r') as f:
+            new_hdr_content = f.read()
+    else:
+        logger.warning(f"Header file not created by rasterio. Creating from the original header...")
+        # If not, copy from the original
+        shutil.copy(hdr_path, output_hdr_path)
+        with open(output_hdr_path, 'r') as f:
+            new_hdr_content = f.read()
+    
+    # Define mandatory fields
+    mandatory_fields = [
+        'bands', 'header offset', 'data type', 'interleave', 'byte order',
+        'map info', 'coordinate system string', 'pixel size', 'background',
+        'wavelength units', 'band names', 'wavelength', 'fwhm'
+    ]
+    
+    # Update data ignore value
+    new_hdr_content = re.sub(
+        r'data ignore value\s*=\s*[^\n]*',
+        'data ignore value = nan',
+        new_hdr_content
+    )
+    
+    # Ensure data type is 4 (float32)
+    new_hdr_content = re.sub(
+        r'data type\s*=\s*\d+',
+        'data type = 4',
+        new_hdr_content
+    )
+    
+    # Check for missing mandatory fields
+    for field in mandatory_fields:
+        # Skip data ignore value as we've already set it
+        if field == 'data ignore value':
+            continue
+            
+        # Check if the field exists in the new header
+        if not re.search(rf'{field}\s*=', new_hdr_content, re.IGNORECASE):
+            # If not, extract it from the original header
+            pattern = rf'{field}\s*=\s*[^{{}}]*(?:{{[^{{}}]*}})?'
+            match = re.search(pattern, orig_hdr_content, re.IGNORECASE | re.DOTALL)
+            if match:
+                # Add the field to the new header
+                field_content = match.group(0)
+                new_hdr_content += f"\n{field_content}"
+                logger.info(f"Added missing field: {field}")
+            else:
+                logger.warning(f"Could not find required field '{field}' in original header")
+    
+    # Write the updated header
+    try:
+        with open(output_hdr_path, 'w') as f:
+            f.write(new_hdr_content)
+    except Exception as e:
+        error_msg = f"Failed to write header file: {str(e)}"
+        logger.error(error_msg)
+        raise
+    
+    logger.info(f"Processing complete!")
+    logger.info(f"Output data file: {output_dat_path}")
+    logger.info(f"Output header file: {output_hdr_path}")
+    
+    return output_dat_path, output_hdr_path
 
