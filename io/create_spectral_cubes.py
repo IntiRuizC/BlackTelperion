@@ -292,15 +292,19 @@ def create_sentinel_spectral_cube(safe_directory, output_dir=None, bands_to_use=
     return spectral_cube, envi_metadata, full_output_path
         
         
+import os
+import numpy as np
 import rasterio
 from rasterio.enums import Resampling
 import re
+import shutil
+import logging
 
 def create_hyspex_spectral_cube(hdr_path, output_dir):
     """
-    Processes a HySpex hyperspectral cube (.hdr and .bsq files):
-    1. Reads the .hdr file and corresponding .bsq data
-    2. Converts all values <= 0 OR equal to 15000 to np.nan
+    Processes a HySpex hyperspectral cube (.hdr and corresponding data file):
+    1. Reads the .hdr file and corresponding data file (.bsq, .dat, or no extension)
+    2. Converts all values < 0 OR equal to 15000 to np.nan
     3. Updates the header to set NaN as the data ignore value
     4. Saves the result as .dat and .hdr files
     
@@ -314,7 +318,13 @@ def create_hyspex_spectral_cube(hdr_path, output_dir):
     Returns:
     --------
     tuple
-        Paths to output .dat and .hdr files
+        (spectral_cube, metadata, output_path)
+        - spectral_cube: numpy.ndarray
+            3D array with dimensions (height, width, bands)
+        - metadata: dict
+            ENVI header metadata
+        - output_path: str
+            Path to the output file (with .dat extension)
     """
     # Create output directory if it doesn't exist
     os.makedirs(output_dir, exist_ok=True)
@@ -323,21 +333,35 @@ def create_hyspex_spectral_cube(hdr_path, output_dir):
     base_name = os.path.basename(hdr_path).replace('.hdr', '')
     input_dir = os.path.dirname(hdr_path)
     
-    # Find the corresponding .bsq file
-    bsq_path = os.path.join(input_dir, f"{base_name}.bsq")
-    if not os.path.exists(bsq_path):
-        # Try finding any .bsq file in the same directory with the same base name
+    # Find the corresponding data file - could be .bsq, .dat, or no extension
+    data_path = None
+    # First try with extensions
+    for ext in ['.bsq', '.dat']:
+        test_path = os.path.join(input_dir, f"{base_name}{ext}")
+        if os.path.exists(test_path):
+            data_path = test_path
+            break
+    
+    # If not found with extensions, try without extension
+    if data_path is None:
+        test_path = os.path.join(input_dir, base_name)
+        if os.path.exists(test_path) and os.path.isfile(test_path):
+            data_path = test_path
+    
+    # If still not found, search for files that start with the base name
+    if data_path is None:
         for file in os.listdir(input_dir):
-            if file.startswith(base_name) and file.endswith('.bsq'):
-                bsq_path = os.path.join(input_dir, file)
+            file_path = os.path.join(input_dir, file)
+            if file.startswith(base_name) and os.path.isfile(file_path) and not file.endswith('.hdr'):
+                data_path = file_path
                 break
     
-    if not os.path.exists(bsq_path):
-        error_msg = f"Could not find .bsq file for {hdr_path}"
+    if data_path is None:
+        error_msg = f"Could not find data file for {hdr_path}"
         logger.error(error_msg)
         raise FileNotFoundError(error_msg)
     
-    logger.info(f"Found corresponding BSQ file: {bsq_path}")
+    logger.info(f"Found corresponding data file: {data_path}")
     
     # Output paths
     output_dat_path = os.path.join(output_dir, f"{base_name}.dat")
@@ -347,11 +371,42 @@ def create_hyspex_spectral_cube(hdr_path, output_dir):
     with open(hdr_path, 'r') as f:
         orig_hdr_content = f.read()
     
-    # Open dataset with rasterio
+    # Initialize spectral_cube and metadata
+    spectral_cube = None
+    envi_metadata = {}
+    
+    # Open dataset with rasterio - FIXED: use 'r' mode instead of header path
     try:
-        with rasterio.open(bsq_path) as src:
+        with rasterio.open(data_path, 'r') as src:
             # Get metadata
             profile = src.profile
+            
+            # Extract metadata for return value
+            envi_metadata = {
+                'description': f'Processed hyperspectral cube from {base_name}',
+                'bands': src.count,
+                'lines': src.height,
+                'samples': src.width,
+                'interleave': 'bsq',
+                'data type': 4,  # float32
+                'byte order': 0,
+                'data ignore value': float('nan')
+            }
+            
+            # Add coordinate information if available
+            if src.crs:
+                envi_metadata['coordinate system string'] = str(src.crs)
+            
+            if src.transform:
+                envi_metadata['map info'] = [
+                    str(src.crs.to_epsg()) if src.crs else '',
+                    '1', '1',  # Pixel location (ENVI format is 1-based)
+                    str(src.transform.c),  # Upper left x
+                    str(src.transform.f),  # Upper left y
+                    str(src.transform.a),  # Pixel width
+                    str(abs(src.transform.e)),  # Pixel height
+                    ' '
+                ]
             
             # Update profile for output
             profile.update(
@@ -361,6 +416,9 @@ def create_hyspex_spectral_cube(hdr_path, output_dir):
             )
             
             logger.info(f"Processing hyperspectral cube with dimensions: {src.width}x{src.height}x{src.count}")
+            
+            # Create 3D array for the spectral cube (height, width, bands)
+            spectral_cube = np.zeros((src.height, src.width, src.count), dtype=np.float32)
             
             # Create output dataset
             with rasterio.open(output_dat_path, 'w', **profile) as dst:
@@ -373,12 +431,15 @@ def create_hyspex_spectral_cube(hdr_path, output_dir):
                     data = data.astype(np.float32)
                     
                     # Set values <= 0 OR equal to 15000 to NaN
-                    data[(data <= 0) | (data == 15000)] = np.nan
+                    data[(data < 0) | (data == 15000)] = np.nan
+                    
+                    # Store in spectral cube (adjust index since rasterio uses 1-based indexing)
+                    spectral_cube[:, :, band_idx-1] = data
                     
                     # Write to output
                     dst.write(data, band_idx)
     except Exception as e:
-        error_msg = f"Error processing BSQ file: {str(e)}"
+        error_msg = f"Error processing data file: {str(e)}"
         logger.error(error_msg)
         raise
     
@@ -433,6 +494,12 @@ def create_hyspex_spectral_cube(hdr_path, output_dir):
                 field_content = match.group(0)
                 new_hdr_content += f"\n{field_content}"
                 logger.info(f"Added missing field: {field}")
+                
+                # Add to our metadata dictionary for the return value
+                if field not in envi_metadata:
+                    # Extract the content part after the equals sign
+                    field_value = field_content.split('=', 1)[1].strip() if '=' in field_content else ''
+                    envi_metadata[field] = field_value
             else:
                 logger.warning(f"Could not find required field '{field}' in original header")
     
@@ -449,5 +516,6 @@ def create_hyspex_spectral_cube(hdr_path, output_dir):
     logger.info(f"Output data file: {output_dat_path}")
     logger.info(f"Output header file: {output_hdr_path}")
     
-    return output_dat_path, output_hdr_path
-
+    # Return the spectral cube, metadata, and output path with extension
+    return spectral_cube, envi_metadata, output_dat_path
+    
